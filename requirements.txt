@@ -1,0 +1,6 @@
+boto3
+botocore
+streamlit
+python-dotenv
+fpdf
+pandas
