@@ -155,7 +155,7 @@ def main():
     # --- Generate PDF Report ---
     pdf_data = generate_pdf_report(results)
     st.download_button(
-        label="📄 Download PDF Report",
+        label="Download PDF Report",
         data=pdf_data,
         file_name="Compliance_Report.pdf",
         mime="application/pdf"
