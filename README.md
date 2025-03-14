@@ -64,7 +64,7 @@ Open the VS Code terminal (press <kbd>Ctrl</kbd>+<kbd>`</kbd> or navigate to **V
 
 ```
 git clone <https://github.com/NaolMengistu/AWS-security-checker.git>
-cd aws-security-checker
+cd aws-security-scanner
 
 ```
 
