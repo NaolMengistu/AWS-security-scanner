@@ -55,7 +55,7 @@ If you don’t have VS Code, download and install it from [here](https://code.vi
 Open a terminal in VS Code (<kbd>Ctrl</kbd>+<kbd>`</kbd>) and run:
 ```
 git clone https://github.com/NaolMengistu/AWS-security-scanner.git
-cd aws-security-checker
+cd aws-security-scanner
 ```
 
 ### **3. Set Up a Virtual Environment**
@@ -213,4 +213,4 @@ aws-security-checker/
 
 ## **Credits**
 
-Developed by: @NaolMengistu, @AliFerzali
+Developed by: [@NaolMengistu](https://github.com/NaolMengistu), [@AliFerzali](https://github.com/AliFerzali)
