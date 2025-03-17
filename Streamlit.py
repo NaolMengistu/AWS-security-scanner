@@ -49,37 +49,55 @@ def run_compliance_checks():
 def generate_pdf_report(results):
     pdf = FPDF()
     pdf.add_page()
+    pdf.set_left_margin(10)  # Set initial left margin for readability
     pdf.set_font("Arial", "B", 16)
     pdf.cell(0, 10, "AWS Compliance Scan Report", ln=True, align="C")
     pdf.ln(10)
-    
+
     for category, items in results.items():
+        # Category heading
         pdf.set_font("Arial", "B", 14)
         pdf.cell(0, 10, category.replace("_", " "), ln=True)
-        pdf.set_font("Arial", "", 12)
-        for item in items:
-            resource = (
-                item.get("Bucket") or
-                item.get("SecurityGroup") or
-                item.get("Role") or
-                item.get("User") or
-                item.get("RouteTable") or
-                item.get("NetworkACL") or
-                item.get("VPC") or
-                "Unknown"
-            )
-            pdf.cell(0, 10, f"Resource: {resource}", ln=True)
-            for issue in item.get("Issues", []):
-                issue_text = issue.get("Issue")
-                mapping = issue.get("DORA_Mapping")
-                action = recommended_actions.get(issue_text, "No recommendation available.")
-                pdf.multi_cell(0, 10, f"Issue: {issue_text}\nDORA Mapping: {mapping}\nRecommendation: {action}\n", border=0)
+        pdf.ln(2)
+
+        if items:
+            for item in items:
+                # Determine resource name
+                resource = (
+                    item.get("Bucket") or
+                    item.get("SecurityGroup") or
+                    item.get("Role") or
+                    item.get("User") or
+                    item.get("RouteTable") or
+                    item.get("NetworkACL") or
+                    item.get("VPC") or
+                    "Unknown"
+                )
+                # Resource subheading
+                pdf.set_font("Arial", "B", 12)
+                pdf.cell(0, 10, f"Resource: {resource}", ln=True)
+                pdf.set_left_margin(15)  # Indent bullet points under resource
+                pdf.set_font("Arial", "", 10)
+
+                # Bullet points for each issue (using '-' instead of '\u2022')
+                for issue in item.get("Issues", []):
+                    issue_text = issue.get("Issue")
+                    mapping = issue.get("DORA_Mapping")
+                    recommendation = recommended_actions.get(issue_text, "No recommendation available.")
+                    pdf.multi_cell(0, 6, f"- Issue: {issue_text}")
+                    pdf.multi_cell(0, 6, f"- DORA Mapping: {mapping}")
+                    pdf.multi_cell(0, 6, f"- Recommendation: {recommendation}")
+                    pdf.ln(2)  # Small space after each issue set
+                pdf.set_left_margin(10)  # Reset margin after resource
+                pdf.ln(5)  # Space after each resource
+        else:
+            # Message for categories with no issues
+            pdf.set_font("Arial", "I", 10)
+            pdf.cell(0, 10, "No issues detected for this category.", ln=True)
             pdf.ln(5)
-        pdf.ln(10)
-    
-    pdf_output = pdf.output(dest="S")
-    if isinstance(pdf_output, bytearray):
-        pdf_output = bytes(pdf_output)
+
+    # Encode PDF output to bytes for download
+    pdf_output = pdf.output(dest="S").encode("latin1")
     return pdf_output
 
 # --- Custom CSS for Dataframe Styling ---
@@ -97,31 +115,29 @@ def main():
     st.markdown("""
     This dashboard displays the results of automated compliance checks on AWS resources, mapping detected misconfigurations to specific DORA compliance requirements.
     """)
-
-    # *** Create a placeholder for the timestamp ***
+    
+    # Create a placeholder for the timestamp
     timestamp_placeholder = st.empty()
-
-    # --- Auto-run compliance checks on first load ---
+    
+    # Auto-run compliance checks on first load and store in session state
     if "results" not in st.session_state:
         st.session_state.results = run_compliance_checks()
         st.session_state.last_run = datetime.now()
-
-    # --- "Re-Run Compliance Checks" Button ---
+    
+    # "Re-Run Compliance Checks" Button
     if st.button("Re-Run Compliance Checks"):
         with st.spinner("Collecting data from AWS..."):
             st.session_state.results = run_compliance_checks()
             st.session_state.last_run = datetime.now()
         st.success("✅ Compliance checks completed!")
     
-    # *** Update the timestamp placeholder with the current last_run value ***
+    # Update the timestamp placeholder
     timestamp_placeholder.markdown(f"**Last checked:** {st.session_state.last_run.strftime('%Y-%m-%d %H:%M:%S')}")
-
+    
     results = st.session_state.results
-
-    # --- Inject Custom CSS ---
     components.html(custom_code, height=0)
-
-    # --- Display Results in Formatted Tables ---
+    
+    # Display results in formatted tables
     for category, items in results.items():
         st.subheader(category.replace("_", " "))
         table_data = []
@@ -144,15 +160,39 @@ def main():
                     "DORA Mapping": issue.get("DORA_Mapping"),
                     "Recommendation": recommended_actions.get(issue.get("Issue"), "No recommendation available.")
                 })
-
         if table_data:
             df = pd.DataFrame(table_data)
             df = df.set_index("No.")  # Use "No." as index
+            # Apply custom CSS for column widths
+            st.markdown(
+                """
+                <style>
+                div[data-testid="stDataFrame"] table {width: 100% !important;}
+                div[data-testid="stDataFrame"] th:nth-child(1),
+                div[data-testid="stDataFrame"] td:nth-child(1),
+                div[data-testid="stDataFrame"] th:nth-child(2),
+                div[data-testid="stDataFrame"] td:nth-child(2) {
+                    min-width: 100px !important;
+                }
+                div[data-testid="stDataFrame"] th:nth-child(3),
+                div[data-testid="stDataFrame"] td:nth-child(3),
+                div[data-testid="stDataFrame"] th:nth-child(4),
+                div[data-testid="stDataFrame"] td:nth-child(4),
+                div[data-testid="stDataFrame"] th:nth-child(5),
+                div[data-testid="stDataFrame"] td:nth-child(5) {
+                    min-width: 50px !important;
+                    word-wrap: break-word;
+                    overflow-wrap: break-word;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True
+            )
             st.dataframe(df, use_container_width=True)
         else:
             st.info("No issues detected for this category.")
-
-    # --- Generate PDF Report ---
+    
+    # Generate PDF Report and provide download button
     pdf_data = generate_pdf_report(results)
     st.download_button(
         label="Download PDF Report",
