@@ -4,10 +4,11 @@ import os
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Load environment variables from the .env file for local development
 load_dotenv()
 
 # --- Load AWS Resource Identifiers from Environment Variables ---
+# These IDs scope the scan to the specific test environment resources.
 VPC_ID = os.getenv("AWS_VPC_ID")
 PUBLIC_SUBNET_ID = os.getenv("AWS_PUBLIC_SUBNET_ID")
 PRIVATE_SUBNET_ID = os.getenv("AWS_PRIVATE_SUBNET_ID")
@@ -15,12 +16,13 @@ ROUTE_TABLE_ID = os.getenv("AWS_ROUTE_TABLE_ID")
 IGW_ID = os.getenv("AWS_IGW_ID")
 PERMISSIVE_ACL_ID = os.getenv("AWS_PERMISSIVE_ACL_ID")
 
-# Initialize boto3 clients
+# Initialize boto3 clients for AWS services
 s3_client = boto3.client('s3', region_name='eu-north-1')
 ec2_client = boto3.client('ec2', region_name='eu-north-1')
 iam_client = boto3.client('iam')
 
-# --- S3 Compliance Check ---
+
+# --- S3 Compliance Checks ---
 def check_s3_compliance():
     issues = []
     buckets = s3_client.list_buckets().get('Buckets', [])
@@ -37,7 +39,7 @@ def check_s3_compliance():
                     config.get('BlockPublicPolicy', True) and 
                     config.get('RestrictPublicBuckets', True)):
                 bucket_issue["Issues"].append({
-                    "Issue": "Public access may be allowed due to misconfigured Public Access Block settings.",
+                    "Issue": "Public access is allowed due to misconfigured Public Access Block settings.",
                     "DORA_Mapping": "Article 9 (Secure Cloud Configurations)"
                 })
         except ClientError as e:
@@ -49,7 +51,7 @@ def check_s3_compliance():
             else:
                 raise
 
-        # Check Bucket Policy for public access
+        # Check the bucket policy for public access
         try:
             policy = s3_client.get_bucket_policy(Bucket=bucket_name)
             policy_doc = json.loads(policy['Policy'])
@@ -63,12 +65,12 @@ def check_s3_compliance():
                     break
         except ClientError as e:
             if e.response['Error']['Code'] == 'NoSuchBucketPolicy':
-                # No policy exists; that's acceptable
+                # No policy exists, which is secure in this context.
                 pass
             else:
                 raise
 
-        # Check if Encryption is enabled
+        # Check if server-side encryption is enabled
         try:
             s3_client.get_bucket_encryption(Bucket=bucket_name)
         except ClientError as e:
@@ -78,7 +80,7 @@ def check_s3_compliance():
                     "DORA_Mapping": "Article 9 (Secure Cloud Configurations)"
                 })
 
-        # Check if Logging is enabled
+        # Check if server access logging is enabled
         try:
             logging = s3_client.get_bucket_logging(Bucket=bucket_name)
             if not logging.get("LoggingEnabled"):
@@ -96,10 +98,11 @@ def check_s3_compliance():
             issues.append(bucket_issue)
     return issues
 
-# --- EC2 Security Group Check ---
+
+# --- EC2 Security Group Checks ---
 def check_ec2_security_groups():
     issues = []
-    # Filter security groups in our test VPC only.
+    # Filter security groups to only those within our specific test VPC
     sg_response = ec2_client.describe_security_groups(
         Filters=[{'Name': 'vpc-id', 'Values': [VPC_ID]}]
     )
@@ -143,8 +146,8 @@ def check_ec2_security_groups():
             issues.append(sg_issue)
     return issues
 
-# --- IAM Policy Checker and User Activity Check ---
 
+# --- IAM Compliance Checks ---
 def policy_allows_wildcards(policy_doc):
     """
     Checks if a given IAM policy document contains wildcard "*" 
@@ -166,17 +169,17 @@ def policy_allows_wildcards(policy_doc):
 
 def check_user_activity(user):
     """
-    Checks if a given IAM user has used their password or access keys.
-    Returns True if the user appears inactive (i.e., no console or API usage).
+    Checks if an IAM user has used their password or access keys recently.
+    Returns True if the user appears to be inactive.
     """
-    # Assume user is inactive
+    # Assume the user is inactive until activity is found
     inactive = True
 
-    # Check for console login (PasswordLastUsed)
+    # Check for console login activity
     if 'PasswordLastUsed' in user:
         inactive = False
 
-    # Check access key usage
+    # Check for access key activity
     user_name = user['UserName']
     access_keys = iam_client.list_access_keys(UserName=user_name).get('AccessKeyMetadata', [])
     for key in access_keys:
@@ -187,7 +190,7 @@ def check_user_activity(user):
                 inactive = False
                 break
         except ClientError:
-            # If error occurs, assume the key has not been used
+            # If an error occurs (e.g., key never used), assume no activity for this key
             continue
 
     return inactive
@@ -199,7 +202,8 @@ def check_iam_policies():
     for role in roles:
         role_name = role['RoleName']
         role_issue = {"Role": role_name, "Issues": []}
-        # Check inline policies
+        
+        # Check inline policies attached to the role
         inline_policies = iam_client.list_role_policies(RoleName=role_name).get('PolicyNames', [])
         for policy_name in inline_policies:
             policy = iam_client.get_role_policy(RoleName=role_name, PolicyName=policy_name)['PolicyDocument']
@@ -208,42 +212,49 @@ def check_iam_policies():
                     "Issue": f"Inline policy '{policy_name}' grants wildcard permissions.",
                     "DORA_Mapping": "Article 5 (ICT Risk Management & Third-Party Oversight)"
                 })
-        # Check attached managed policies (placeholder for detailed analysis)
+        
+        # This is a simplified check for attached managed policies.
+        # A full implementation would inspect the policy document of each managed policy.
         attached_policies = iam_client.list_attached_role_policies(RoleName=role_name).get('AttachedPolicies', [])
         for attached_policy in attached_policies:
             role_issue["Issues"].append({
                 "Issue": f"Review attached policy '{attached_policy['PolicyName']}' for wildcard permissions.",
                 "DORA_Mapping": "Article 5 (ICT Risk Management & Third-Party Oversight)"
             })
+            
         if role_issue["Issues"]:
             issues.append(role_issue)
     
-    # Check IAM Users for MFA and user activity
+    # Check IAM Users for MFA status and inactivity
     users = iam_client.list_users().get('Users', [])
     for user in users:
         user_name = user['UserName']
         user_issue = {"User": user_name, "Issues": []}
+        
         mfa_devices = iam_client.list_mfa_devices(UserName=user_name).get('MFADevices', [])
         if not mfa_devices:
             user_issue["Issues"].append({
                 "Issue": "User does not have MFA enabled.",
                 "DORA_Mapping": "Article 5 (ICT Risk Management & Third-Party Oversight)"
             })
-        # Use new logic to check if user is inactive
+        
+        # Check if the user account has been inactive
         if check_user_activity(user):
             user_issue["Issues"].append({
                 "Issue": "User account appears to be inactive (no console or API usage).",
                 "DORA_Mapping": "Article 5 (ICT Risk Management & Third-Party Oversight)"
             })
+            
         if user_issue["Issues"]:
             issues.append(user_issue)
     
     return issues
 
-# --- VPC Configurations Check ---
+
+# --- VPC Configuration Checks ---
 def check_vpc_configurations():
     issues = []
-    # Filter Route Tables to our Test VPC only
+    # Filter Route Tables to our specific test VPC
     route_tables = ec2_client.describe_route_tables(
         Filters=[{'Name': 'vpc-id', 'Values': [VPC_ID]}]
     ).get('RouteTables', [])
@@ -261,7 +272,7 @@ def check_vpc_configurations():
         if rt_issue["Issues"]:
             issues.append(rt_issue)
 
-    # Filter Network ACLs to our Test VPC and specifically our permissive ACL
+    # Filter Network ACLs to our test VPC and the specific permissive ACL
     acls = ec2_client.describe_network_acls(
         Filters=[
             {'Name': 'vpc-id', 'Values': [VPC_ID]},
@@ -280,13 +291,13 @@ def check_vpc_configurations():
         if acl_issue["Issues"]:
             issues.append(acl_issue)
     
-    # Filter Subnets to our Test VPC only
+    # Filter Subnets to our specific test VPC
     subnets = ec2_client.describe_subnets(
         Filters=[{'Name': 'vpc-id', 'Values': [VPC_ID]}]
     ).get('Subnets', [])
     for subnet in subnets:
         subnet_id = subnet['SubnetId']
-        # Check if this subnet is public (auto-assign public IP enabled)
+        # Check if the subnet automatically assigns public IPs to instances
         if subnet.get('MapPublicIpOnLaunch', False):
             issues.append({
                 "Subnet": subnet_id,
@@ -296,7 +307,7 @@ def check_vpc_configurations():
                 }]
             })
     
-    # Check if VPC Flow Logs are enabled for our Test VPC
+    # Check if VPC Flow Logs are enabled for our test VPC
     flow_logs = ec2_client.describe_flow_logs().get('FlowLogs', [])
     vpc_flow_log_ids = {log['ResourceId'] for log in flow_logs}
     if VPC_ID not in vpc_flow_log_ids:
@@ -317,7 +328,7 @@ def main():
         "IAM_Issues": check_iam_policies(),
         "VPC_Issues": check_vpc_configurations()
     }
-    # Output the results as JSON so they can be rendered later (e.g., by Streamlit)
+    # Print results as JSON for consumption by other scripts (in our case the streamlit.py)
     print(json.dumps(results, indent=4))
 
 if __name__ == '__main__':
